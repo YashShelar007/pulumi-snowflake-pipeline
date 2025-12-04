@@ -1,0 +1,21 @@
+{
+  "name": "pulumi-snowflake-pipeline",
+  "version": "1.0.0",
+  "description": "Cloud Data Infrastructure with Pulumi + Snowflake",
+  "main": "index.ts",
+  "scripts": {
+    "build": "tsc",
+    "preview": "pulumi preview",
+    "up": "pulumi up",
+    "destroy": "pulumi destroy"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3.0.0",
+    "@pulumi/aws": "^6.0.0",
+    "@pulumi/snowflake": "^0.50.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,3 @@
+name: pulumi-snowflake-pipeline
+runtime: nodejs
+description: Cloud Data Infrastructure with Pulumi + Snowflake - IaC data pipeline provisioning AWS S3 and Snowflake resources

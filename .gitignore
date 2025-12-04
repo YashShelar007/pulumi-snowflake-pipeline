@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+bin/
+
+# Pulumi
+Pulumi.*.yaml
+!Pulumi.yaml
+
+# Environment
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Data files (too large for git)
+data/*.parquet
+data/*.csv
+!data/sample.csv
