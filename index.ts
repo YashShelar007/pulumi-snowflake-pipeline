@@ -16,7 +16,7 @@ const environment = pulumi.getStack(); // dev, staging, prod
 
 // 1. S3 Bucket - Data Landing Zone
 const dataBucket = new aws.s3.Bucket(`${projectName}-bucket`, {
-  bucket: `${projectName}-data-${environment}-${Date.now()}`,
+  bucket: `${projectName}-data-${environment}-649768096234`,  // Use AWS account ID for uniqueness
   forceDestroy: true, // Allow deletion even with objects (for demo)
   tags: {
     Project: projectName,
@@ -25,26 +25,7 @@ const dataBucket = new aws.s3.Bucket(`${projectName}-bucket`, {
   },
 });
 
-// 2. S3 Bucket Policy - Allow Snowflake access
-const bucketPolicy = new aws.s3.BucketPolicy(`${projectName}-bucket-policy`, {
-  bucket: dataBucket.id,
-  policy: pulumi.all([dataBucket.arn]).apply(([bucketArn]) =>
-    JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [
-        {
-          Sid: "AllowSnowflakeAccess",
-          Effect: "Allow",
-          Principal: "*", // Will be restricted by IAM role
-          Action: ["s3:GetObject", "s3:GetObjectVersion", "s3:ListBucket"],
-          Resource: [bucketArn, `${bucketArn}/*`],
-        },
-      ],
-    })
-  ),
-});
-
-// 3. IAM Role - For Snowflake to assume
+// 2. IAM Role - For Snowflake to assume
 const snowflakeRole = new aws.iam.Role(`${projectName}-snowflake-role`, {
   name: `${projectName}-snowflake-access-${environment}`,
   assumeRolePolicy: JSON.stringify({
@@ -53,13 +34,12 @@ const snowflakeRole = new aws.iam.Role(`${projectName}-snowflake-role`, {
       {
         Effect: "Allow",
         Principal: {
-          // Snowflake's AWS account - update with your storage integration's AWS IAM user ARN
-          AWS: "*", // Will be updated after storage integration is created
+          AWS: "arn:aws:iam::752221278321:user/a99c1000-s",
         },
         Action: "sts:AssumeRole",
         Condition: {
           StringEquals: {
-            "sts:ExternalId": "snowflake_external_id", // Replace with actual external ID
+            "sts:ExternalId": "GVB61581_SFCRole=4_lQyXtP94AeZklKTYvdVF2y0d+5o=",
           },
         },
       },
@@ -145,7 +125,7 @@ const csvFileFormat = new snowflake.FileFormat(`${projectName}-csv-format`, {
   formatType: "CSV",
   fieldDelimiter: ",",
   skipHeader: 1,
-  nullIf: ["NULL", "null", ""],
+  nullIfs: ["NULL", "null", ""],
   emptyFieldAsNull: true,
   comment: "CSV file format for data ingestion",
 });
