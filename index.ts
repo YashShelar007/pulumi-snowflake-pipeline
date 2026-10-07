@@ -9,6 +9,8 @@ import * as snowflake from "@pulumi/snowflake";
 const config = new pulumi.Config();
 const projectName = "data-pipeline";
 const environment = pulumi.getStack(); // dev, staging, prod
+// Snowflake names use DATA_PIPELINE: a hyphen would force quoting in every query.
+const snowflakePrefix = projectName.toUpperCase().replace(/-/g, "_");
 
 // =============================================================================
 // AWS Resources (4 resources)
@@ -83,7 +85,7 @@ const snowflakePolicy = new aws.iam.RolePolicy(
 
 // 5. Snowflake Warehouse - Compute resource
 const warehouse = new snowflake.Warehouse(`${projectName}-warehouse`, {
-  name: `${projectName.toUpperCase()}_WH`,
+  name: `${snowflakePrefix}_WH`,
   warehouseSize: "X-SMALL", // Start small, can scale up
   autoSuspend: 60, // Suspend after 60 seconds of inactivity
   autoResume: true,
@@ -92,7 +94,7 @@ const warehouse = new snowflake.Warehouse(`${projectName}-warehouse`, {
 
 // 6. Snowflake Database
 const database = new snowflake.Database(`${projectName}-database`, {
-  name: `${projectName.toUpperCase()}_DB`,
+  name: `${snowflakePrefix}_DB`,
   comment: "Data pipeline database managed by Pulumi",
 });
 
@@ -107,7 +109,7 @@ const schema = new snowflake.Schema(`${projectName}-schema`, {
 const storageIntegration = new snowflake.StorageIntegration(
   `${projectName}-storage-integration`,
   {
-    name: `${projectName.toUpperCase()}_S3_INT`,
+    name: `${snowflakePrefix}_S3_INT`,
     type: "EXTERNAL_STAGE",
     storageProvider: "S3",
     enabled: true,
