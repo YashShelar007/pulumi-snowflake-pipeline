@@ -47,7 +47,7 @@ test("instructions copy each sample file with its own file format", async () => 
     text.match(/COPY INTO[^;]*;/g)?.find((copy) => copy.includes(`'${file}'`)) ?? "";
 
   assert.match(copyOf("sample.csv"), /FORMAT_NAME = CSV_FORMAT/);
-  assert.match(copyOf("yellow_tripdata_2024-01.parquet"), /FORMAT_NAME = PARQUET_FORMAT/);
+  assert.match(copyOf("yellow_tripdata_2024-01.parquet"), /TYPE = PARQUET/);
 });
 
 test("first deploy: bucket and trust policy use the configured account", async () => {
@@ -58,4 +58,34 @@ test("first deploy: bucket and trust policy use the configured account", async (
   const [trust] = JSON.parse(inputsByType["aws:iam/role:Role"].assumeRolePolicy).Statement;
   assert.equal(trust.Principal.AWS, "arn:aws:iam::111111111111:root");
   assert.equal(trust.Condition.StringEquals["sts:ExternalId"], "0000");
+});
+
+// Columns of yellow_tripdata_2024-01.parquet, read from the file's footer with pyarrow 19.
+const parquetColumns = [
+  "VendorID", "tpep_pickup_datetime", "tpep_dropoff_datetime", "passenger_count",
+  "trip_distance", "RatecodeID", "store_and_fwd_flag", "PULocationID", "DOLocationID",
+  "payment_type", "fare_amount", "extra", "mta_tax", "tip_amount", "tolls_amount",
+  "improvement_surcharge", "total_amount", "congestion_surcharge", "Airport_fee",
+];
+
+test("Parquet COPY feeds every TAXI_DATA column from a column the file has", async () => {
+  const instructions = await valueOf((await program).instructions);
+  const tableColumns: string[] = inputsByType["snowflake:index/table:Table"].columns
+    .map((column: { name: string }) => column.name)
+    .filter((name: string) => name !== "LOADED_AT");
+
+  for (const [where, text] of [
+    ["instructions", instructions],
+    ["setup.sql", readFileSync("snowflake/setup.sql", "utf8")],
+  ]) {
+    const copy = text.match(/COPY INTO[^;]*PARQUET[^;]*;/)?.[0] ?? "";
+    const targets = copy.match(/COPY INTO TAXI_DATA \(([^)]*)\)/)?.[1].split(",").map((c) => c.trim());
+    const sources = [...copy.matchAll(/\$1:(\w+)/g)].map((m) => m[1]);
+
+    assert.deepEqual(targets, tableColumns, `${where}: target column list`);
+    assert.equal(sources.length, tableColumns.length, `${where}: one source per target`);
+    for (const source of sources) assert.ok(parquetColumns.includes(source), `${where}: ${source}`);
+    // Without it, this file's timestamps (INT64 micros, no ConvertedType) load as integers.
+    assert.match(copy, /USE_LOGICAL_TYPE = TRUE/, where);
+  }
 });
