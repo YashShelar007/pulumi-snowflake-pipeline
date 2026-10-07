@@ -4,7 +4,7 @@ A Pulumi program in TypeScript that provisions an S3 bucket, an IAM role, and th
 
 ## What it does not do
 
-- It does not load data. You upload a file and run `COPY INTO` yourself (steps 6 and 7 below).
+- It does not load data. You upload a file and run `COPY INTO` yourself (see [Quickstart](#quickstart)).
 - It does not set up Snowpipe, scheduling, or any transformation.
 
 ## Quickstart
@@ -49,20 +49,14 @@ pulumi config set storageAwsExternalId STORAGE_AWS_EXTERNAL_ID
 pulumi up
 ```
 
-Load a file and copy it in:
+Load a file:
 
 ```bash
 curl -O https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
 aws s3 cp yellow_tripdata_2024-01.parquet s3://YOUR_BUCKET_NAME/raw/
 ```
 
-```sql
-COPY INTO DATA_PIPELINE_DB.RAW.TAXI_DATA
-FROM @DATA_PIPELINE_DB.RAW.S3_STAGE
-FILE_FORMAT = (TYPE = PARQUET)
-MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
-ON_ERROR = CONTINUE;
-```
+Then copy it in by running the `USE` statements and the Parquet `COPY INTO` at the top of `snowflake/setup.sql`. `pulumi stack output instructions` prints the same steps with your bucket name filled in.
 
 Tear down with `pulumi destroy` and `pulumi stack rm dev`.
 
@@ -71,6 +65,8 @@ Tear down with `pulumi destroy` and `pulumi stack rm dev`.
 `index.ts` declares 11 resources. On AWS: a bucket (`forceDestroy` is on, so `pulumi destroy` deletes it even with files in it), an IAM role that Snowflake assumes, and a role policy granting `s3:GetObject`, `s3:GetObjectVersion`, `s3:ListBucket` and `s3:GetBucketLocation` on that bucket.
 
 On Snowflake: an X-SMALL warehouse that suspends after 60 seconds, a database, a `RAW` schema, a storage integration that points at the IAM role, a CSV and a Parquet file format, an external stage over `s3://<bucket>/raw/`, and a `TAXI_DATA` table with 11 columns (the last, `LOADED_AT`, defaults to the current timestamp).
+
+The NYC Parquet file names five of those columns differently (`VendorID`, `tpep_pickup_datetime`, `tpep_dropoff_datetime`, `PULocationID`, `DOLocationID`), so its `COPY INTO` maps all ten loaded columns in a `SELECT`. It also sets `USE_LOGICAL_TYPE = TRUE`; without it, Snowflake reads this file's timestamps as microsecond integers.
 
 Resource names come from the string `data-pipeline`. On Snowflake it is upper-cased with an underscore for the hyphen, so the database is `DATA_PIPELINE_DB` and SQL needs no quoting.
 
@@ -88,6 +84,7 @@ Other files: `snowflake/setup.sql` holds follow-up queries (row count, a daily s
 ## Known limits
 
 - The author reports loading 2,964,624 rows (NYC Yellow Taxi, January 2024, 48 MB Parquet) in about 33 seconds. That run was not reproduced here.
+- `PARQUET_FORMAT` is created, but the Parquet `COPY INTO` sets its options inline instead of using it, because `@pulumi/snowflake` 0.50 cannot set `USE_LOGICAL_TYPE` on a file format.
 - No CI. `npm test` is the only automated check, and it never touches AWS or Snowflake.
 
 ## Status

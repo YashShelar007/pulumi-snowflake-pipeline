@@ -228,12 +228,17 @@ DEPLOYMENT COMPLETE! Next steps:
    FILES = ('sample.csv')
    FILE_FORMAT = (FORMAT_NAME = CSV_FORMAT);
 
-   -- The Parquet file:
-   COPY INTO TAXI_DATA
-   FROM @S3_STAGE
+   -- The Parquet file names five columns differently (VendorID, PULocationID, ...), so map
+   -- each one. USE_LOGICAL_TYPE = TRUE loads its timestamps as timestamps, not integers.
+   COPY INTO TAXI_DATA (VENDOR_ID, PICKUP_DATETIME, DROPOFF_DATETIME, PASSENGER_COUNT,
+     TRIP_DISTANCE, PICKUP_LOCATION_ID, DROPOFF_LOCATION_ID, FARE_AMOUNT, TIP_AMOUNT, TOTAL_AMOUNT)
+   FROM (SELECT $1:VendorID::NUMBER, $1:tpep_pickup_datetime::TIMESTAMP_NTZ,
+     $1:tpep_dropoff_datetime::TIMESTAMP_NTZ, $1:passenger_count::NUMBER, $1:trip_distance::FLOAT,
+     $1:PULocationID::NUMBER, $1:DOLocationID::NUMBER, $1:fare_amount::FLOAT,
+     $1:tip_amount::FLOAT, $1:total_amount::FLOAT
+     FROM @S3_STAGE)
    FILES = ('yellow_tripdata_2024-01.parquet')
-   FILE_FORMAT = (FORMAT_NAME = PARQUET_FORMAT)
-   MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
+   FILE_FORMAT = (TYPE = PARQUET USE_LOGICAL_TYPE = TRUE);
 
 4. Verify data loaded:
    SELECT COUNT(*) FROM TAXI_DATA;
