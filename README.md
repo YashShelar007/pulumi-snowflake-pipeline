@@ -82,7 +82,6 @@ Other files: `snowflake/setup.sql` holds follow-up queries (row count, a daily s
 ## Known limits
 
 - `index.ts` hardcodes an AWS account ID in the bucket name, and a Snowflake IAM user ARN and external ID in the trust policy. They are identifiers from the author's own deployment, not credentials. Replace the trust policy values as described above; the bucket name still carries the author's account ID.
-- The `instructions` stack output suggests loading `sample.csv` and then copying with `PARQUET_FORMAT`; a CSV needs `CSV_FORMAT`.
 - The author reports loading 2,964,624 rows (NYC Yellow Taxi, January 2024, 48 MB Parquet) in about 33 seconds. That run was not reproduced here.
 - No CI. `npm test` is the only automated check, and it never touches AWS or Snowflake.
 

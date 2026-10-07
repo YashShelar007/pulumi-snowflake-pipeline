@@ -33,3 +33,12 @@ test("snowflake/setup.sql uses the names the program creates", async () => {
     await valueOf(created.storageIntegrationName),
   );
 });
+
+test("instructions copy each sample file with its own file format", async () => {
+  const text = await valueOf((await program).instructions);
+  const copyOf = (file: string) =>
+    text.match(/COPY INTO[^;]*;/g)?.find((copy) => copy.includes(`'${file}'`)) ?? "";
+
+  assert.match(copyOf("sample.csv"), /FORMAT_NAME = CSV_FORMAT/);
+  assert.match(copyOf("yellow_tripdata_2024-01.parquet"), /FORMAT_NAME = PARQUET_FORMAT/);
+});
