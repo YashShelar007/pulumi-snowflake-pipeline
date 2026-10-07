@@ -1,114 +1,53 @@
-# Cloud Data Infrastructure with Pulumi + Snowflake
+# pulumi-snowflake-pipeline
 
-Infrastructure-as-Code data pipeline provisioning AWS S3 and Snowflake resources using Pulumi (TypeScript).
+A Pulumi program in TypeScript that provisions an S3 bucket, an IAM role, and the Snowflake warehouse, database, stage and table needed to load files from S3 into Snowflake with `COPY INTO`. It is for anyone who wants a small, readable example of wiring AWS and Snowflake together as code instead of by hand in two consoles.
 
-## What This Project Does
+## What it does not do
 
-- Provisions **11 cloud resources** across AWS and Snowflake using Pulumi IaC
-- Creates automated data ingestion pipeline from S3 → Snowflake
-- Loads **2.9M+ rows in ~33 seconds** using Snowflake's COPY INTO
-- Reduces manual infrastructure setup from **2+ hours to under 5 minutes**
+- It does not load data. You upload a file and run `COPY INTO` yourself (steps 6 and 7 below).
+- It does not set up Snowpipe, scheduling, or any transformation.
+- It does not remove the hardcoded identifiers in `index.ts` (see Known limits). Deploy it only after you have read them.
 
-## Architecture
+## Quickstart
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Pulumi    │────▶│   AWS S3 Bucket  │────▶│   Snowflake     │
-│  (IaC)      │     │   + IAM Role     │     │   Warehouse     │
-└─────────────┘     └──────────────────┘     └─────────────────┘
-                           │                        │
-                           ▼                        ▼
-                    ┌──────────────┐         ┌─────────────────┐
-                    │  NYC Taxi    │         │ Storage         │
-                    │  (Parquet)   │         │ Integration     │
-                    └──────────────┘         └─────────────────┘
-```
-
-## Resources Provisioned (11)
-
-**AWS (3 resources):**
-1. S3 Bucket - Data landing zone with force destroy enabled
-2. IAM Role - For Snowflake to assume via STS
-3. IAM Role Policy - S3 read permissions (GetObject, ListBucket)
-
-**Snowflake (8 resources):**
-4. Warehouse - X-SMALL with auto-suspend (60s)
-5. Database - DATA_PIPELINE_DB
-6. Schema - RAW
-7. Storage Integration - S3 connection with IAM role
-8. File Format (CSV) - With header skip and null handling
-9. File Format (Parquet) - For large datasets
-10. External Stage - S3 mount point
-11. Table - TAXI_DATA with 11 columns
-
-## Prerequisites
-
-1. **Pulumi CLI** - `brew install pulumi` or https://www.pulumi.com/docs/install/
-2. **Node.js 18+** - https://nodejs.org/
-3. **AWS CLI configured** - `aws configure`
-4. **Snowflake account** - Free trial at https://signup.snowflake.com/
-
-## Quick Start
-
-### 1. Install Dependencies
+You need Node.js 18 or newer, the Pulumi CLI, the AWS CLI configured for an account you control, and a Snowflake account.
 
 ```bash
+git clone https://github.com/YashShelar007/pulumi-snowflake-pipeline.git
 cd pulumi-snowflake-pipeline
 npm install
+npx tsc --noEmit        # type-checks index.ts
 ```
 
-### 2. Initialize Pulumi Stack
+The commands above were run on a clean clone. Everything below needs live AWS and Snowflake credentials and was not run for this README (not verified: no credentials in the polish environment).
 
 ```bash
 pulumi login --local
 pulumi stack init dev
-```
 
-### 3. Configure Credentials
-
-```bash
-# AWS
 pulumi config set aws:region us-east-1
-
-# Snowflake
 pulumi config set snowflake:account YOUR_ACCOUNT_IDENTIFIER
 pulumi config set snowflake:username YOUR_USERNAME
 pulumi config set --secret snowflake:password YOUR_PASSWORD
 pulumi config set snowflake:role ACCOUNTADMIN
-```
 
-### 4. Deploy Infrastructure
-
-```bash
 pulumi up
 ```
 
-This will provision all 11 resources in ~30-60 seconds.
+Then close the trust loop. Snowflake generates its own AWS identity for the storage integration, so the role's trust policy has to be updated after the first deploy:
 
-### 5. Update IAM Trust Policy
-
-After deployment, get Snowflake's AWS identity:
 ```sql
 DESC STORAGE INTEGRATION "DATA-PIPELINE_S3_INT";
 ```
 
-Update the IAM role trust policy in `index.ts` with:
-- `STORAGE_AWS_IAM_USER_ARN`
-- `STORAGE_AWS_EXTERNAL_ID`
+Copy `STORAGE_AWS_IAM_USER_ARN` and `STORAGE_AWS_EXTERNAL_ID` into the `assumeRolePolicy` in `index.ts` (the `Principal.AWS` and `sts:ExternalId` values), and run `pulumi up` again.
 
-Then run `pulumi up` again.
-
-### 6. Load Data
+Load a file and copy it in:
 
 ```bash
-# Download NYC Taxi dataset (~50MB, 2.9M rows)
 curl -O https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
-
-# Upload to S3
 aws s3 cp yellow_tripdata_2024-01.parquet s3://YOUR_BUCKET_NAME/raw/
 ```
-
-### 7. Run COPY INTO
 
 ```sql
 COPY INTO "DATA-PIPELINE_DB".RAW.TAXI_DATA
@@ -118,47 +57,39 @@ MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
 ON_ERROR = CONTINUE;
 ```
 
-## Project Structure
+Tear down with `pulumi destroy` and `pulumi stack rm dev`.
+
+## How it works
+
+`index.ts` declares 11 resources. On AWS: a bucket (`forceDestroy` is on, so `pulumi destroy` deletes it even with files in it), an IAM role that Snowflake assumes, and a role policy granting `s3:GetObject`, `s3:GetObjectVersion`, `s3:ListBucket` and `s3:GetBucketLocation` on that bucket.
+
+On Snowflake: an X-SMALL warehouse that suspends after 60 seconds, a database, a `RAW` schema, a storage integration that points at the IAM role, a CSV and a Parquet file format, an external stage over `s3://<bucket>/raw/`, and a `TAXI_DATA` table with 11 columns (the last, `LOADED_AT`, defaults to the current timestamp).
+
+Resource names come from the string `data-pipeline`, upper-cased for Snowflake. That is why the database is `DATA-PIPELINE_DB`, hyphen included, and why you must quote it in SQL.
 
 ```
-pulumi-snowflake-pipeline/
-├── Pulumi.yaml          # Project configuration
-├── Pulumi.dev.yaml      # Dev stack config (gitignored)
-├── package.json         # Node dependencies
-├── tsconfig.json        # TypeScript config
-├── index.ts             # Main Pulumi program (11 resources)
-├── snowflake/
-│   └── setup.sql        # Additional SQL utilities
-├── data/
-│   └── sample.csv       # Sample data for testing
-└── README.md
+Pulumi program (index.ts)
+   |-- AWS:       S3 bucket, IAM role, role policy
+   `-- Snowflake: warehouse, database, schema, storage integration,
+                  CSV + Parquet formats, S3 stage, TAXI_DATA table
+
+S3 bucket /raw/  --(storage integration + IAM role)-->  stage  --COPY INTO-->  TAXI_DATA
 ```
 
-## Verified Metrics
+Other files: `snowflake/setup.sql` holds follow-up queries (row count, a daily summary view, a clustering key), and `data/sample.csv` is a 10-row sample with the same columns as the table minus `LOADED_AT`.
 
-| Metric | Value |
-|--------|-------|
-| Resources provisioned | 11 |
-| Data loaded | 2,964,624 rows |
-| Load time | ~33 seconds |
-| Dataset | NYC Yellow Taxi Jan 2024 |
-| File size | 48 MB (Parquet) |
+## Known limits
 
-## Cleanup
+- `index.ts` hardcodes an AWS account ID in the bucket name, and a Snowflake IAM user ARN and external ID in the trust policy. They are identifiers from the author's own deployment, not credentials. Replace the trust policy values as described above; the bucket name still carries the author's account ID.
+- `snowflake/setup.sql` uses `DATA_PIPELINE_WH` and `DATA_PIPELINE_DB` (underscore), but the program creates `DATA-PIPELINE_WH` and `DATA-PIPELINE_DB` (hyphen). Quote the names or edit the script before running it.
+- The `instructions` stack output suggests loading `sample.csv` and then copying with `PARQUET_FORMAT`; a CSV needs `CSV_FORMAT`.
+- The author reports loading 2,964,624 rows (NYC Yellow Taxi, January 2024, 48 MB Parquet) in about 33 seconds. That run was not reproduced here.
+- No tests, no CI.
 
-```bash
-pulumi destroy
-pulumi stack rm dev
-```
+## Status
 
-## Technologies
-
-- **Pulumi** - Infrastructure as Code (TypeScript)
-- **AWS S3** - Object storage for data landing
-- **AWS IAM** - Cross-account access for Snowflake
-- **Snowflake** - Cloud data warehouse
-- **TypeScript** - Type-safe infrastructure code
+Built in 2025 as a cloud computing project. Not actively developed.
 
 ## License
 
-MIT
+MIT. See `LICENSE`.
