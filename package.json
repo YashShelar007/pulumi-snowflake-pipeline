@@ -5,6 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "build": "tsc",
+    "test": "tsc && node --test bin/index.test.js",
     "preview": "pulumi preview",
     "up": "pulumi up",
     "destroy": "pulumi destroy"

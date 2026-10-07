@@ -6,7 +6,6 @@ A Pulumi program in TypeScript that provisions an S3 bucket, an IAM role, and th
 
 - It does not load data. You upload a file and run `COPY INTO` yourself (steps 6 and 7 below).
 - It does not set up Snowpipe, scheduling, or any transformation.
-- It does not remove the hardcoded identifiers in `index.ts` (see Known limits). Deploy it only after you have read them.
 
 ## Quickstart
 
@@ -17,6 +16,7 @@ git clone https://github.com/YashShelar007/pulumi-snowflake-pipeline.git
 cd pulumi-snowflake-pipeline
 npm install
 npx tsc --noEmit        # type-checks index.ts
+npm test                # runs index.ts against Pulumi mocks, no credentials needed
 ```
 
 The commands above were run on a clean clone. Everything below needs live AWS and Snowflake credentials and was not run for this README (not verified: no credentials in the polish environment).
@@ -26,6 +26,7 @@ pulumi login --local
 pulumi stack init dev
 
 pulumi config set aws:region us-east-1
+pulumi config set awsAccountId "$(aws sts get-caller-identity --query Account --output text)"
 pulumi config set snowflake:account YOUR_ACCOUNT_IDENTIFIER
 pulumi config set snowflake:username YOUR_USERNAME
 pulumi config set --secret snowflake:password YOUR_PASSWORD
@@ -34,13 +35,19 @@ pulumi config set snowflake:role ACCOUNTADMIN
 pulumi up
 ```
 
-Then close the trust loop. Snowflake generates its own AWS identity for the storage integration, so the role's trust policy has to be updated after the first deploy:
+Then close the trust loop. Snowflake generates its own AWS identity for the storage integration, so the role's trust policy has to be updated after the first deploy. Until you do, the role trusts only your own account, with the placeholder external ID `0000`:
 
 ```sql
-DESC STORAGE INTEGRATION "DATA-PIPELINE_S3_INT";
+DESC STORAGE INTEGRATION DATA_PIPELINE_S3_INT;
 ```
 
-Copy `STORAGE_AWS_IAM_USER_ARN` and `STORAGE_AWS_EXTERNAL_ID` into the `assumeRolePolicy` in `index.ts` (the `Principal.AWS` and `sts:ExternalId` values), and run `pulumi up` again.
+Copy the `STORAGE_AWS_IAM_USER_ARN` and `STORAGE_AWS_EXTERNAL_ID` values from that output into stack config, and deploy again:
+
+```bash
+pulumi config set storageAwsIamUserArn STORAGE_AWS_IAM_USER_ARN
+pulumi config set storageAwsExternalId STORAGE_AWS_EXTERNAL_ID
+pulumi up
+```
 
 Load a file and copy it in:
 
@@ -50,8 +57,8 @@ aws s3 cp yellow_tripdata_2024-01.parquet s3://YOUR_BUCKET_NAME/raw/
 ```
 
 ```sql
-COPY INTO "DATA-PIPELINE_DB".RAW.TAXI_DATA
-FROM @"DATA-PIPELINE_DB".RAW.S3_STAGE
+COPY INTO DATA_PIPELINE_DB.RAW.TAXI_DATA
+FROM @DATA_PIPELINE_DB.RAW.S3_STAGE
 FILE_FORMAT = (TYPE = PARQUET)
 MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
 ON_ERROR = CONTINUE;
@@ -65,7 +72,7 @@ Tear down with `pulumi destroy` and `pulumi stack rm dev`.
 
 On Snowflake: an X-SMALL warehouse that suspends after 60 seconds, a database, a `RAW` schema, a storage integration that points at the IAM role, a CSV and a Parquet file format, an external stage over `s3://<bucket>/raw/`, and a `TAXI_DATA` table with 11 columns (the last, `LOADED_AT`, defaults to the current timestamp).
 
-Resource names come from the string `data-pipeline`, upper-cased for Snowflake. That is why the database is `DATA-PIPELINE_DB`, hyphen included, and why you must quote it in SQL.
+Resource names come from the string `data-pipeline`. On Snowflake it is upper-cased with an underscore for the hyphen, so the database is `DATA_PIPELINE_DB` and SQL needs no quoting.
 
 ```
 Pulumi program (index.ts)
@@ -80,11 +87,8 @@ Other files: `snowflake/setup.sql` holds follow-up queries (row count, a daily s
 
 ## Known limits
 
-- `index.ts` hardcodes an AWS account ID in the bucket name, and a Snowflake IAM user ARN and external ID in the trust policy. They are identifiers from the author's own deployment, not credentials. Replace the trust policy values as described above; the bucket name still carries the author's account ID.
-- `snowflake/setup.sql` uses `DATA_PIPELINE_WH` and `DATA_PIPELINE_DB` (underscore), but the program creates `DATA-PIPELINE_WH` and `DATA-PIPELINE_DB` (hyphen). Quote the names or edit the script before running it.
-- The `instructions` stack output suggests loading `sample.csv` and then copying with `PARQUET_FORMAT`; a CSV needs `CSV_FORMAT`.
 - The author reports loading 2,964,624 rows (NYC Yellow Taxi, January 2024, 48 MB Parquet) in about 33 seconds. That run was not reproduced here.
-- No tests, no CI.
+- No CI. `npm test` is the only automated check, and it never touches AWS or Snowflake.
 
 ## Status
 

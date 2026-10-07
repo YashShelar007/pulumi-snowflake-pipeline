@@ -9,6 +9,17 @@ import * as snowflake from "@pulumi/snowflake";
 const config = new pulumi.Config();
 const projectName = "data-pipeline";
 const environment = pulumi.getStack(); // dev, staging, prod
+// Snowflake names use DATA_PIPELINE: a hyphen would force quoting in every query.
+const snowflakePrefix = projectName.toUpperCase().replace(/-/g, "_");
+
+// Your 12-digit AWS account ID, used to make the bucket name unique.
+const awsAccountId = config.require("awsAccountId");
+// Snowflake's AWS identity for the storage integration. It only exists after the first
+// deploy (see DESC STORAGE INTEGRATION in the README). Until it is set, the role trusts
+// your own account with external ID "0000", the interim setup in Snowflake's S3 guide.
+const storageAwsIamUserArn =
+  config.get("storageAwsIamUserArn") ?? `arn:aws:iam::${awsAccountId}:root`;
+const storageAwsExternalId = config.get("storageAwsExternalId") ?? "0000";
 
 // =============================================================================
 // AWS Resources (4 resources)
@@ -16,7 +27,7 @@ const environment = pulumi.getStack(); // dev, staging, prod
 
 // 1. S3 Bucket - Data Landing Zone
 const dataBucket = new aws.s3.Bucket(`${projectName}-bucket`, {
-  bucket: `${projectName}-data-${environment}-649768096234`,  // Use AWS account ID for uniqueness
+  bucket: `${projectName}-data-${environment}-${awsAccountId}`,
   forceDestroy: true, // Allow deletion even with objects (for demo)
   tags: {
     Project: projectName,
@@ -34,12 +45,12 @@ const snowflakeRole = new aws.iam.Role(`${projectName}-snowflake-role`, {
       {
         Effect: "Allow",
         Principal: {
-          AWS: "arn:aws:iam::752221278321:user/a99c1000-s",
+          AWS: storageAwsIamUserArn,
         },
         Action: "sts:AssumeRole",
         Condition: {
           StringEquals: {
-            "sts:ExternalId": "GVB61581_SFCRole=4_lQyXtP94AeZklKTYvdVF2y0d+5o=",
+            "sts:ExternalId": storageAwsExternalId,
           },
         },
       },
@@ -83,7 +94,7 @@ const snowflakePolicy = new aws.iam.RolePolicy(
 
 // 5. Snowflake Warehouse - Compute resource
 const warehouse = new snowflake.Warehouse(`${projectName}-warehouse`, {
-  name: `${projectName.toUpperCase()}_WH`,
+  name: `${snowflakePrefix}_WH`,
   warehouseSize: "X-SMALL", // Start small, can scale up
   autoSuspend: 60, // Suspend after 60 seconds of inactivity
   autoResume: true,
@@ -92,7 +103,7 @@ const warehouse = new snowflake.Warehouse(`${projectName}-warehouse`, {
 
 // 6. Snowflake Database
 const database = new snowflake.Database(`${projectName}-database`, {
-  name: `${projectName.toUpperCase()}_DB`,
+  name: `${snowflakePrefix}_DB`,
   comment: "Data pipeline database managed by Pulumi",
 });
 
@@ -107,7 +118,7 @@ const schema = new snowflake.Schema(`${projectName}-schema`, {
 const storageIntegration = new snowflake.StorageIntegration(
   `${projectName}-storage-integration`,
   {
-    name: `${projectName.toUpperCase()}_S3_INT`,
+    name: `${snowflakePrefix}_S3_INT`,
     type: "EXTERNAL_STAGE",
     storageProvider: "S3",
     enabled: true,
@@ -210,14 +221,23 @@ DEPLOYMENT COMPLETE! Next steps:
    USE DATABASE ${database.name};
    USE SCHEMA ${schema.name};
 
+   -- sample.csv has 10 columns, so name them; LOADED_AT takes its default.
+   COPY INTO TAXI_DATA (VENDOR_ID, PICKUP_DATETIME, DROPOFF_DATETIME, PASSENGER_COUNT,
+     TRIP_DISTANCE, PICKUP_LOCATION_ID, DROPOFF_LOCATION_ID, FARE_AMOUNT, TIP_AMOUNT, TOTAL_AMOUNT)
+   FROM (SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 FROM @S3_STAGE)
+   FILES = ('sample.csv')
+   FILE_FORMAT = (FORMAT_NAME = CSV_FORMAT);
+
+   -- The Parquet file:
    COPY INTO TAXI_DATA
    FROM @S3_STAGE
-   FILE_FORMAT = PARQUET_FORMAT
+   FILES = ('yellow_tripdata_2024-01.parquet')
+   FILE_FORMAT = (FORMAT_NAME = PARQUET_FORMAT)
    MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE;
 
 4. Verify data loaded:
    SELECT COUNT(*) FROM TAXI_DATA;
-   -- Should show 1M+ rows loaded in <30 seconds!
+   -- sample.csv adds 10 rows; the Parquet file adds over 1M.
 
 ================================================================================
 `;
