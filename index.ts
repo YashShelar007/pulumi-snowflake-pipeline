@@ -12,13 +12,22 @@ const environment = pulumi.getStack(); // dev, staging, prod
 // Snowflake names use DATA_PIPELINE: a hyphen would force quoting in every query.
 const snowflakePrefix = projectName.toUpperCase().replace(/-/g, "_");
 
+// Your 12-digit AWS account ID, used to make the bucket name unique.
+const awsAccountId = config.require("awsAccountId");
+// Snowflake's AWS identity for the storage integration. It only exists after the first
+// deploy (see DESC STORAGE INTEGRATION in the README). Until it is set, the role trusts
+// your own account with external ID "0000", the interim setup in Snowflake's S3 guide.
+const storageAwsIamUserArn =
+  config.get("storageAwsIamUserArn") ?? `arn:aws:iam::${awsAccountId}:root`;
+const storageAwsExternalId = config.get("storageAwsExternalId") ?? "0000";
+
 // =============================================================================
 // AWS Resources (4 resources)
 // =============================================================================
 
 // 1. S3 Bucket - Data Landing Zone
 const dataBucket = new aws.s3.Bucket(`${projectName}-bucket`, {
-  bucket: `${projectName}-data-${environment}-649768096234`,  // Use AWS account ID for uniqueness
+  bucket: `${projectName}-data-${environment}-${awsAccountId}`,
   forceDestroy: true, // Allow deletion even with objects (for demo)
   tags: {
     Project: projectName,
@@ -36,12 +45,12 @@ const snowflakeRole = new aws.iam.Role(`${projectName}-snowflake-role`, {
       {
         Effect: "Allow",
         Principal: {
-          AWS: "arn:aws:iam::752221278321:user/a99c1000-s",
+          AWS: storageAwsIamUserArn,
         },
         Action: "sts:AssumeRole",
         Condition: {
           StringEquals: {
-            "sts:ExternalId": "GVB61581_SFCRole=4_lQyXtP94AeZklKTYvdVF2y0d+5o=",
+            "sts:ExternalId": storageAwsExternalId,
           },
         },
       },
