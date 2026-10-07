@@ -4,7 +4,7 @@ A Pulumi program in TypeScript that provisions an S3 bucket, an IAM role, and th
 
 ## What it does not do
 
-- It does not load data. You upload a file and run `COPY INTO` yourself (steps 6 and 7 below).
+- It does not load data. You upload a file and run `COPY INTO` yourself (see [Quickstart](#quickstart)).
 - It does not set up Snowpipe, scheduling, or any transformation.
 
 ## Quickstart
